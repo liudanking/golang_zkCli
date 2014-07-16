@@ -6,6 +6,8 @@
 # Folders
 _obj
 _test
+# ignore golang package .a folder
+pkg
 
 # Architecture specific extensions/prefixes
 *.[568vq]
