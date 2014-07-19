@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"go-zookeeper/zk"
 	"os"
@@ -61,7 +62,7 @@ func showNodeStatus(status *zk.Stat) {
 
 // handle command
 func commandHandler(conn *zk.Conn, command string) {
-	fmt.Println("command: ", command)
+	//fmt.Println("command: ", command)
 	args := strings.Split(command, " ")
 	switch args[0] {
 	case "create":
@@ -78,6 +79,8 @@ func commandHandler(conn *zk.Conn, command string) {
 		cmdGetAcl(conn, args[1:])
 	case "setAcl":
 		cmdSetAcl(conn, args[1:])
+	case "addauth":
+		cmdAddauth(conn, args[1:])
 	default:
 		showHelpInfo()
 	}
@@ -207,11 +210,18 @@ func cmdSetAcl(conn *zk.Conn, args []string) {
 		return
 	}
 
-	var acl []zk.ACL
-	aclStrs := strings.Split(args[1], ":")
-	switch aclStrs[0] { // todo
-	case "digest":
-		acl = zk.DigestACL(zk.PermAll, aclStrs[1], aclStrs[2])
+	// var acl []zk.ACL
+	// aclStrs := strings.Split(args[1], ":")
+	// switch aclStrs[0] { // todo
+	// case "digest":
+	// 	acl = zk.DigestACL(zk.PermAll, aclStrs[1], aclStrs[2]) //digestAclMake(args[1])
+	// case "auth":
+	// default: // "world": "anyone"
+	// }
+	acl, err := makeAcl(args[1])
+	if err != nil {
+		fmt.Println("make acl failed:", err)
+		return
 	}
 
 	if status, err := conn.SetACL(args[0], acl, -1); err != nil {
@@ -219,6 +229,65 @@ func cmdSetAcl(conn *zk.Conn, args []string) {
 		return
 	} else {
 		showNodeStatus(status)
+	}
+}
+
+func makeAcl(arg string) (acl []zk.ACL, err error) {
+	aclArgs := strings.Split(arg, ":")
+
+	if len(aclArgs) < 2 {
+		err = errors.New("args invalid")
+		return
+	}
+	permBytes := []byte(aclArgs[len(aclArgs)-1])
+	perms := int32(0)
+	for _, p := range permBytes {
+		switch p {
+		case 'c':
+			perms |= zk.PermCreate
+		case 'd':
+			perms |= zk.PermDelete
+		case 'r':
+			perms |= zk.PermRead
+		case 'w':
+			perms |= zk.PermWrite
+		case 'a':
+			perms |= zk.PermAdmin
+		}
+	}
+
+	switch aclArgs[0] {
+	case "digest":
+		if len(aclArgs) == 4 {
+			acl = zk.DigestACL(perms, aclArgs[1], aclArgs[2])
+			err = nil
+		}
+	case "world":
+		if len(aclArgs) == 3 {
+			acl = zk.WorldACL(perms)
+			err = nil
+		}
+	case "auth":
+		if len(aclArgs) == 2 {
+			acl = zk.AuthACL(perms)
+			err = nil
+		}
+	default:
+		err = errors.New("args invalid")
+	}
+
+	return
+}
+
+func cmdAddauth(conn *zk.Conn, args []string) {
+	if len(args) < 2 {
+		fmt.Println("arg invalid: ", args)
+		return
+	}
+
+	if err := conn.AddAuth(args[0], []byte(args[1])); err != nil {
+		fmt.Println("add auth failed:", err)
+		return
 	}
 }
 
@@ -248,11 +317,13 @@ func main() {
 	}
 
 	// connect to zk server
-	conn, zkEvent, err := zk.Connect([]string{zkServerAddr}, time.Second*3)
+	conn, _, err := zk.Connect([]string{zkServerAddr}, time.Second*3)
 	if err != nil {
-		fmt.Printf("connect to %s failed. error: %v", zkServerAddr, err)
+		fmt.Printf("connect to %s failed. error: %v\n", zkServerAddr, err)
+	} else {
+		fmt.Printf("connected to %s\n", zkServerAddr)
 	}
-	go zkEventWatcher(zkEvent)
+	//go zkEventWatcher(zkEvent)
 
 	// parse user input command
 	reader := bufio.NewReader(os.Stdin)
